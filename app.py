@@ -83,6 +83,8 @@ st.caption(
 
 with st.sidebar:
     st.header("Settings")
+    show_current_arrows = st.checkbox("Show current arrows", value=True)
+    show_wave_arrows = st.checkbox("Show significant wave arrows", value=True)
     st.markdown("""**Wind speed color thresholds (knots)**
 - < 16 = green
 - 16–24 = orange
@@ -179,17 +181,20 @@ def enrich_df(df_in: pd.DataFrame):
         "sigWaveHeight_m","sigWaveDir_deg_from",
         "windWaveHeight_m","windWaveDir_deg_from",
         "swellHeight_m","swellDir_deg_from",
-        "currentSpeed_kt","currentDir_deg_from","currentDir_deg_to"]
+        "currentSpeed_kt","currentDir_deg_to","currentDir_deg_from"
+    ]
     existing = [c for c in preferred_cols if c in out.columns]
     others = [c for c in out.columns if c not in existing]
     out = out[existing + others]
     return out
 
-def make_map(df_points: pd.DataFrame):
+def make_map(df_points: pd.DataFrame, show_current_arrows=True, show_wave_arrows=True):
     if df_points.empty:
         return None
     center = [df_points["lat"].mean(), df_points["lon"].mean()]
     m = folium.Map(location=center, zoom_start=3, tiles="OpenStreetMap", control_scale=True)
+    curr_fg = folium.FeatureGroup(name='Currents', show=True)
+    wave_fg = folium.FeatureGroup(name='Significant Waves', show=True)
 
     folium.TileLayer(
         tiles="https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png",
@@ -248,7 +253,10 @@ Current: {cs_txt} kt @ {r.get('currentDir_deg_to','')}° (to) / {r.get('currentD
             else:
                 c_col = "#FFA500"
             c_len = 800 + float(cs_val) * 1800  # meters
-            draw_vector(m, r["lat"], r["lon"], float(cd_to), shaft_len_m=c_len, body_weight=5, color=c_col)
+                
+            if show_current_arrows:
+                draw_vector(curr_fg, r["lat"], r["lon"], float(cd_to), shaft_len_m=c_len, body_weight=5, color=c_col)
+
 
         # Significant wave direction arrow (points into the position, using FROM dir)
         hs = r.get("sigWaveHeight_m")
@@ -262,8 +270,12 @@ Current: {cs_txt} kt @ {r.get('currentDir_deg_to','')}° (to) / {r.get('currentD
             else:
                 w_col = "#696969"  # dark grey
             w_len = 700 + float(hs) * 700  # meters
-            draw_vector(m, r["lat"], r["lon"], wave_bearing_into_tip, shaft_len_m=w_len, body_weight=7, color=w_col)
+                        if show_wave_arrows:
+                draw_vector(wave_fg, r["lat"], r["lon"], wave_bearing_into_tip, shaft_len_m=w_len, body_weight=7, color=w_col)
 
+
+    curr_fg.add_to(m)
+    wave_fg.add_to(m)
     folium.LayerControl().add_to(m)
     return m
 
@@ -292,13 +304,18 @@ if do_bulk and uploaded is not None:
 
 if isinstance(result_df, pd.DataFrame) and not result_df.empty:
     st.subheader("2) Results")
-    st.dataframe(result_df, use_container_width=True, hide_index=True)
+    df_display = result_df.copy()
+    df_display = df_display.rename(columns={
+        "currentDir_deg_to": "Current direction (going to)",
+        "currentDir_deg_from": "Current direction (coming from)"
+    })
+    st.dataframe(df_display, use_container_width=True, hide_index=True)
 
     csv_bytes = result_df.to_csv(index=False).encode("utf-8")
     st.download_button("Download CSV", data=csv_bytes, file_name="nautical_weather_results.csv", mime="text/csv")
 
     st.subheader("3) Map")
-    m = make_map(result_df)
+    m = make_map(result_df, show_current_arrows=show_current_arrows, show_wave_arrows=show_wave_arrows)
     if m:
         from streamlit.components.v1 import html as st_html
         st_html(m.get_root().render(), height=600, scrolling=False)
