@@ -1,22 +1,24 @@
 import os
+import sys
+from pathlib import Path as _Path
+from math import radians, degrees, sin, cos, asin, atan2
+
 import folium
 import streamlit as st
 import pandas as pd
+
 import stormglass_client as sgc
 from stormglass_client import StormglassClient
 
-# Robust local import of utils whether running from repo root or a subfolder (e.g., /mount/src/stormglass/app.py)
-import sys
-from pathlib import Path as _Path
+# Make sure we can import utils whether this file is in repo root or a subfolder
 _here = _Path(__file__).resolve()
 for _p in (_here.parent, _here.parent.parent):
     if _p and str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
+
 from utils import to_knots, normalize_input_df, wind_color
 
-# ---- small geodesy & arrow drawing helpers ----
-from math import radians, degrees, sin, cos, asin, atan2
-
+# ---------------- Geodesy helpers for arrows ----------------
 EARTH_R_M = 6371000.0
 
 def destination_point(lat, lon, bearing_deg, distance_m):
@@ -32,7 +34,7 @@ def destination_point(lat, lon, bearing_deg, distance_m):
     x = cos(delta) - sin(phi1) * sin_phi2
     lam2 = lam1 + atan2(y, x)
 
-    return degrees(phi2), (degrees(lam2) + 540) % 360 - 180  # normalize lon
+    return degrees(phi2), (degrees(lam2) + 540) % 360 - 180  # normalize lon to [-180, 180]
 
 def draw_arrow(m, tip_lat, tip_lon, bearing_towards_tip_deg, shaft_len_m=2000, color="#FF0000", weight=3):
     """Draw an arrow with head at the tip; it points into the tip from bearing_towards_tip_deg."""
@@ -55,22 +57,22 @@ def draw_arrow(m, tip_lat, tip_lon, bearing_towards_tip_deg, shaft_len_m=2000, c
     right_lat, right_lon = destination_point(tip_lat, tip_lon, right_bearing, head_len)
     folium.PolyLine([[right_lat, right_lon], [tip_lat, tip_lon]], color=color, weight=weight, opacity=0.9).add_to(m)
 
+# ---------------- Streamlit UI ----------------
 st.set_page_config(page_title="Nautical Weather Map", page_icon="🌊", layout="wide")
 
-st.title("🌊 Nautical Weather Map — Stormglass")
+st.title("Nautical Weather Map — Stormglass")
 st.caption(
-    f"Client v{getattr(sgc, '__CLIENT_VERSION__', 'unknown')} · Enter one position/time or upload many, then visualize wind, "
-    "Significant wave (Hs), Wind wave, swell, and currents on a nautical chart. Data source: Stormglass (Weather/Marine/Ocean)."
+    f"Client v{getattr(sgc, '__CLIENT_VERSION__', 'unknown')} · Enter one position/time or upload many, then visualize wind, waves, swell, and currents. Data: Stormglass"
 )
 
 with st.sidebar:
     st.header("Settings")
-    st.markdown(\"\"\"**Wind speed color thresholds (knots)**  
-- `< 16` = green  
-- `16–24` = orange  
-- `> 24` = red\"\"\")
+    st.markdown("""**Wind speed color thresholds (knots)**
+- < 16 = green
+- 16–24 = orange
+- > 24 = red""")
     st.write("---")
-    st.write("Add your API key in **Secrets** as `STORMGLASS_API_KEY`.")
+    st.write("Add your API key in **Secrets** as STORMGLASS_API_KEY.")
 
 api_key = st.secrets.get("STORMGLASS_API_KEY") or os.getenv("STORMGLASS_API_KEY")
 debug = st.sidebar.checkbox("Debug API params to logs", value=False)
@@ -89,7 +91,7 @@ tab_single, tab_bulk = st.tabs(["Single point", "Bulk upload CSV/XLSX"])
 with tab_single:
     c1, c2, c3 = st.columns([1,1,1])
     with c1:
-        ts = st.text_input("Timestamp (UTC) e.g., `2025-09-20 06:30` or ISO", value="2025-09-20 06:00")
+        ts = st.text_input("Timestamp (UTC) e.g., 2025-09-20 06:30 or ISO", value="2025-09-20 06:00")
     with c2:
         lat = st.number_input("Latitude", value=40.0, format="%.6f")
     with c3:
@@ -108,19 +110,18 @@ def _fetch_one(_lat, _lon, _ts_iso, _api_key):
     try:
         payload = client_local.fetch_point(float(_lat), float(_lon), parsed.to_pydatetime())
         requested_iso = payload.get("_requested_iso")
-        values = client_local.extract_values(payload, requested_iso=requested_iso)
-        values = values or {}
+        values = client_local.extract_values(payload, requested_iso=requested_iso) or {}
         values["requested_iso"] = requested_iso
         values["req_lat"] = float(_lat)
         values["req_lon"] = float(_lon)
-        # ---- units handling ----
+        # units
         units = payload.get("_units", {})
         wind_unit = units.get("wind", "mps")
         current_unit = units.get("current", "mps")
-        # Stormglass returns m/s for wind by default; convert to knots
+        # wind m/s -> knots
         if "windSpeed" in values and values["windSpeed"] is not None:
             values["windSpeed_kt"] = float(to_knots(values["windSpeed"])) if wind_unit != "kn" else float(values["windSpeed"])
-        # currents are m/s; convert to knots
+        # current m/s -> knots
         if "currentSpeed" in values and values["currentSpeed"] is not None:
             values["currentSpeed_kt"] = float(to_knots(values["currentSpeed"])) if current_unit == "mps" else float(values["currentSpeed"])
         return values
@@ -143,7 +144,7 @@ def enrich_df(df_in: pd.DataFrame):
         rows.append(rec)
     out = pd.DataFrame(rows)
 
-    # Rename for clarity (same names as Open-Meteo variant so downstream stays identical)
+    # Rename to match previous schema
     rename_map = {
         "windDirection": "windDir_deg_from",
         "waveHeight": "sigWaveHeight_m",
@@ -162,8 +163,7 @@ def enrich_df(df_in: pd.DataFrame):
         "sigWaveHeight_m","sigWaveDir_deg_from",
         "windWaveHeight_m","windWaveDir_deg_from",
         "swellHeight_m","swellDir_deg_from",
-        "currentSpeed_kt","currentDir_deg_to"
-    ]
+        "currentSpeed_kt","currentDir_deg_to"]
     existing = [c for c in preferred_cols if c in out.columns]
     others = [c for c in out.columns if c not in existing]
     out = out[existing + others]
@@ -177,7 +177,7 @@ def make_map(df_points: pd.DataFrame):
 
     folium.TileLayer(
         tiles="https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png",
-        attr="Map data: © OpenSeaMap contributors",
+        attr="Map data: OpenSeaMap contributors",
         name="OpenSeaMap (Nautical)",
         overlay=True,
         control=True
@@ -199,13 +199,13 @@ def make_map(df_points: pd.DataFrame):
 
         tt = folium.Tooltip(
             f"""
-<b>Time (UTC):</b> {r.get('timestamp_utc') or ''}<br>
-<b>Lat/Lon:</b> {r.get('lat'):.4f}, {r.get('lon'):.4f}<br>
-<b>Wind:</b> {ws_txt} kt @ {r.get('windDir_deg_from','')}° (from)<br>
-<b>Significant wave (Hs):</b> {r.get('sigWaveHeight_m','')} m @ {r.get('sigWaveDir_deg_from','')}° (from)<br>
-<b>Wind wave:</b> {r.get('windWaveHeight_m','')} m @ {r.get('windWaveDir_deg_from','')}° (from)<br>
-<b>Swell:</b> {r.get('swellHeight_m','')} m @ {r.get('swellDir_deg_from','')}° (from)<br>
-<b>Current:</b> {cs_txt} kt @ {r.get('currentDir_deg_to','')}° (to)
+Time (UTC): {r.get('timestamp_utc') or ''}
+Lat/Lon: {r.get('lat'):.4f}, {r.get('lon'):.4f}
+Wind: {ws_txt} kt @ {r.get('windDir_deg_from','')} deg (from)
+Significant wave (Hs): {r.get('sigWaveHeight_m','')} m @ {r.get('sigWaveDir_deg_from','')} deg (from)
+Wind wave: {r.get('windWaveHeight_m','')} m @ {r.get('windWaveDir_deg_from','')} deg (from)
+Swell: {r.get('swellHeight_m','')} m @ {r.get('swellDir_deg_from','')} deg (from)
+Current: {cs_txt} kt @ {r.get('currentDir_deg_to','')} deg (to)
 """,
             sticky=True
         )
@@ -219,11 +219,10 @@ def make_map(df_points: pd.DataFrame):
             weight=1
         ).add_child(tt).add_to(m)
 
-        # ---- Current arrow (arrow points INTO the position; direction is 'to') ----
+        # Current arrow (points into the position; direction is 'to')
         cs_val = r.get("currentSpeed_kt")
         cd_to = r.get("currentDir_deg_to")
         if cs_val is not None and not pd.isna(cs_val) and cd_to is not None and not pd.isna(cd_to):
-            # Speed thresholds for color
             if cs_val < 0.5:
                 c_col = "#FFA500"  # orange
             elif cs_val > 2.0:
@@ -232,11 +231,10 @@ def make_map(df_points: pd.DataFrame):
                 c_col = "#FF7F7F"  # light red
             else:
                 c_col = "#FFA500"
-            # Length proportional to speed (visible scale)
             c_len = 800 + float(cs_val) * 1800  # meters
             draw_arrow(m, r["lat"], r["lon"], float(cd_to), shaft_len_m=c_len, color=c_col, weight=3)
 
-        # ---- Significant wave direction arrow (points INTO the position) ----
+        # Significant wave direction arrow (points into the position, using FROM dir)
         hs = r.get("sigWaveHeight_m")
         wd_from = r.get("sigWaveDir_deg_from")
         if hs is not None and not pd.isna(hs) and wd_from is not None and not pd.isna(wd_from):
@@ -255,15 +253,7 @@ def make_map(df_points: pd.DataFrame):
 
 result_df = None
 
-st.subheader("2) Fetch")
-if 'do_single' not in st.session_state:
-    st.session_state['do_single'] = False
-
-if 'do_bulk' not in st.session_state:
-    st.session_state['do_bulk'] = False
-
-# Buttons were defined earlier; we keep the same names to preserve behavior
-if 'do_single' in locals() and do_single:
+if do_single:
     df = pd.DataFrame([{"timestamp": ts, "lat": lat, "lon": lon}])
     try:
         df_norm = df.rename(columns={"timestamp":"timestamp","lat":"lat","lon":"lon"})
@@ -273,7 +263,7 @@ if 'do_single' in locals() and do_single:
     except Exception as e:
         st.error(f"Failed to parse/fetch: {e}")
 
-if 'do_bulk' in locals() and do_bulk and uploaded is not None:
+if do_bulk and uploaded is not None:
     try:
         if uploaded.name.lower().endswith(".csv"):
             df_in = pd.read_csv(uploaded)
@@ -285,13 +275,13 @@ if 'do_bulk' in locals() and do_bulk and uploaded is not None:
         st.error(f"Upload or processing error: {e}")
 
 if isinstance(result_df, pd.DataFrame) and not result_df.empty:
-    st.subheader("3) Results")
+    st.subheader("2) Results")
     st.dataframe(result_df, use_container_width=True, hide_index=True)
 
     csv_bytes = result_df.to_csv(index=False).encode("utf-8")
-    st.download_button("⬇️ Download CSV", data=csv_bytes, file_name="nautical_weather_results.csv", mime="text/csv")
+    st.download_button("Download CSV", data=csv_bytes, file_name="nautical_weather_results.csv", mime="text/csv")
 
-    st.subheader("4) Map")
+    st.subheader("3) Map")
     m = make_map(result_df)
     if m:
         from streamlit.components.v1 import html as st_html
@@ -299,4 +289,4 @@ if isinstance(result_df, pd.DataFrame) and not result_df.empty:
     else:
         st.info("No map to display yet.")
 else:
-    st.info("Enter a point or upload a file, then click **Fetch**.")
+    st.info("Enter a point or upload a file, then click Fetch.")
