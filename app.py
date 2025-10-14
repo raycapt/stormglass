@@ -6,24 +6,21 @@ import stormglass_client as sgc
 from stormglass_client import StormglassClient
 
 # Robust local import of utils whether running from repo root or a subfolder (e.g., /mount/src/stormglass/app.py)
-import sys, os
-from pathlib import Path
-_here = Path(__file__).resolve()
-_candidates = [
-    _here.parent,            # folder containing app.py
-    _here.parent.parent,     # parent folder (repo root when app is in a subfolder)
-]
-for _p in _candidates:
+import sys
+from pathlib import Path as _Path
+_here = _Path(__file__).resolve()
+for _p in (_here.parent, _here.parent.parent):
     if _p and str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
-try:
-    from utils import to_knots, normalize_input_df, wind_color
+from utils import to_knots, normalize_input_df, wind_color
+
+# ---- small geodesy & arrow drawing helpers ----
 from math import radians, degrees, sin, cos, asin, atan2
 
 EARTH_R_M = 6371000.0
 
 def destination_point(lat, lon, bearing_deg, distance_m):
-    \"\"\"Compute destination point from (lat, lon) moving distance_m along bearing_deg (0 deg = North).\"\"\"
+    """Compute destination point from (lat, lon) moving distance_m along bearing_deg (0 deg = North)."""
     phi1 = radians(lat)
     lam1 = radians(lon)
     theta = radians(bearing_deg)
@@ -37,8 +34,8 @@ def destination_point(lat, lon, bearing_deg, distance_m):
 
     return degrees(phi2), (degrees(lam2) + 540) % 360 - 180  # normalize lon
 
-def draw_arrow(m, tip_lat, tip_lon, bearing_towards_tip_deg, shaft_len_m=2000, color=\"#FF0000\", weight=3):
-    \"\"\"Draw an arrow with head at the tip; it points into the tip from bearing_towards_tip_deg.\"\"\"
+def draw_arrow(m, tip_lat, tip_lon, bearing_towards_tip_deg, shaft_len_m=2000, color="#FF0000", weight=3):
+    """Draw an arrow with head at the tip; it points into the tip from bearing_towards_tip_deg."""
     # Tail point is away from the tip along the opposite direction
     tail_bearing = (bearing_towards_tip_deg + 180.0) % 360.0
     tail_lat, tail_lon = destination_point(tip_lat, tip_lon, tail_bearing, shaft_len_m)
@@ -58,9 +55,6 @@ def draw_arrow(m, tip_lat, tip_lon, bearing_towards_tip_deg, shaft_len_m=2000, c
     right_lat, right_lon = destination_point(tip_lat, tip_lon, right_bearing, head_len)
     folium.PolyLine([[right_lat, right_lon], [tip_lat, tip_lon]], color=color, weight=weight, opacity=0.9).add_to(m)
 
-except Exception as _e:
-    raise ModuleNotFoundError(f"Could not import utils.py. Tried paths: {list(map(str, _candidates))}. Original error: {_e}")
-
 st.set_page_config(page_title="Nautical Weather Map", page_icon="🌊", layout="wide")
 
 st.title("🌊 Nautical Weather Map — Stormglass")
@@ -71,10 +65,10 @@ st.caption(
 
 with st.sidebar:
     st.header("Settings")
-    st.markdown("""**Wind speed color thresholds (knots)**  
+    st.markdown(\"\"\"**Wind speed color thresholds (knots)**  
 - `< 16` = green  
 - `16–24` = orange  
-- `> 24` = red""")
+- `> 24` = red\"\"\")
     st.write("---")
     st.write("Add your API key in **Secrets** as `STORMGLASS_API_KEY`.")
 
@@ -229,6 +223,7 @@ def make_map(df_points: pd.DataFrame):
         cs_val = r.get("currentSpeed_kt")
         cd_to = r.get("currentDir_deg_to")
         if cs_val is not None and not pd.isna(cs_val) and cd_to is not None and not pd.isna(cd_to):
+            # Speed thresholds for color
             if cs_val < 0.5:
                 c_col = "#FFA500"  # orange
             elif cs_val > 2.0:
@@ -237,6 +232,7 @@ def make_map(df_points: pd.DataFrame):
                 c_col = "#FF7F7F"  # light red
             else:
                 c_col = "#FFA500"
+            # Length proportional to speed (visible scale)
             c_len = 800 + float(cs_val) * 1800  # meters
             draw_arrow(m, r["lat"], r["lon"], float(cd_to), shaft_len_m=c_len, color=c_col, weight=3)
 
@@ -259,7 +255,15 @@ def make_map(df_points: pd.DataFrame):
 
 result_df = None
 
-if do_single:
+st.subheader("2) Fetch")
+if 'do_single' not in st.session_state:
+    st.session_state['do_single'] = False
+
+if 'do_bulk' not in st.session_state:
+    st.session_state['do_bulk'] = False
+
+# Buttons were defined earlier; we keep the same names to preserve behavior
+if 'do_single' in locals() and do_single:
     df = pd.DataFrame([{"timestamp": ts, "lat": lat, "lon": lon}])
     try:
         df_norm = df.rename(columns={"timestamp":"timestamp","lat":"lat","lon":"lon"})
@@ -269,7 +273,7 @@ if do_single:
     except Exception as e:
         st.error(f"Failed to parse/fetch: {e}")
 
-if do_bulk and uploaded is not None:
+if 'do_bulk' in locals() and do_bulk and uploaded is not None:
     try:
         if uploaded.name.lower().endswith(".csv"):
             df_in = pd.read_csv(uploaded)
@@ -281,13 +285,13 @@ if do_bulk and uploaded is not None:
         st.error(f"Upload or processing error: {e}")
 
 if isinstance(result_df, pd.DataFrame) and not result_df.empty:
-    st.subheader("2) Results")
+    st.subheader("3) Results")
     st.dataframe(result_df, use_container_width=True, hide_index=True)
 
     csv_bytes = result_df.to_csv(index=False).encode("utf-8")
     st.download_button("⬇️ Download CSV", data=csv_bytes, file_name="nautical_weather_results.csv", mime="text/csv")
 
-    st.subheader("3) Map")
+    st.subheader("4) Map")
     m = make_map(result_df)
     if m:
         from streamlit.components.v1 import html as st_html
