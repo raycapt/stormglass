@@ -10,7 +10,7 @@ import pandas as pd
 import stormglass_client as sgc
 from stormglass_client import StormglassClient
 
-# Make sure we can import utils whether this file is in repo root or a subfolder
+# Ensure we can import utils whether this file is in repo root or a subfolder
 _here = _Path(__file__).resolve()
 for _p in (_here.parent, _here.parent.parent):
     if _p and str(_p) not in sys.path:
@@ -34,30 +34,9 @@ def destination_point(lat, lon, bearing_deg, distance_m):
     x = cos(delta) - sin(phi1) * sin_phi2
     lam2 = lam1 + atan2(y, x)
 
-    return degrees(phi2), (degrees(lam2) + 540) % 360 - 180  # normalize lon to [-180, 180]
+    return degrees(phi2), (degrees(lam2) + 540) % 360 - 180  # normalize lon
 
-def draw_arrow(m, tip_lat, tip_lon, bearing_towards_tip_deg, shaft_len_m=2000, color="#FF0000", weight=3):
-    """Draw an arrow with head at the tip; it points into the tip from bearing_towards_tip_deg."""
-    # Tail point is away from the tip along the opposite direction
-    tail_bearing = (bearing_towards_tip_deg + 180.0) % 360.0
-    tail_lat, tail_lon = destination_point(tip_lat, tip_lon, tail_bearing, shaft_len_m)
-
-    # Main shaft
-    folium.PolyLine([[tail_lat, tail_lon], [tip_lat, tip_lon]], color=color, weight=weight, opacity=0.9).add_to(m)
-
-    # Arrow head (two short segments)
-    head_len = max(shaft_len_m * 0.25, 400)  # ensure visible
-    head_angle = 25.0  # degrees off the shaft
-    # Left head
-    left_bearing = (bearing_towards_tip_deg - head_angle) % 360.0
-    left_lat, left_lon = destination_point(tip_lat, tip_lon, left_bearing, head_len)
-    folium.PolyLine([[left_lat, left_lon], [tip_lat, tip_lon]], color=color, weight=weight, opacity=0.9).add_to(m)
-    # Right head
-    right_bearing = (bearing_towards_tip_deg + head_angle) % 360.0
-    right_lat, right_lon = destination_point(tip_lat, tip_lon, right_bearing, head_len)
-    folium.PolyLine([[right_lat, right_lon], [tip_lat, tip_lon]], color=color, weight=weight, opacity=0.9).add_to(m)
-
-def draw_vector(m, tip_lat, tip_lon, bearing_towards_tip_deg, shaft_len_m=2000, body_weight=4, color="#FF0000"):
+def draw_vector(m, tip_lat, tip_lon, bearing_towards_tip_deg, shaft_len_m=2000, body_weight=5, color="#FF0000"):
     """Windy-like vector: thick shaft + filled triangular head at tip."""
     # Tail of shaft
     tail_bearing = (bearing_towards_tip_deg + 180.0) % 360.0
@@ -76,21 +55,21 @@ def draw_vector(m, tip_lat, tip_lon, bearing_towards_tip_deg, shaft_len_m=2000, 
 # ---------------- Streamlit UI ----------------
 st.set_page_config(page_title="Nautical Weather Map", page_icon="🌊", layout="wide")
 
-st.title("Nautical Weather Map — Stormglass")
+st.title("🌊 Nautical Weather Map — Stormglass")
 st.caption(
     f"Client v{getattr(sgc, '__CLIENT_VERSION__', 'unknown')} · Enter one position/time or upload many, then visualize wind, waves, swell, and currents. Data: Stormglass"
 )
 
 with st.sidebar:
     st.header("Settings")
-    show_current_arrows = st.checkbox("Show current arrows", value=True)
-    show_wave_arrows = st.checkbox("Show significant wave arrows", value=True)
     st.markdown("""**Wind speed color thresholds (knots)**
 - < 16 = green
 - 16–24 = orange
 - > 24 = red""")
     st.write("---")
     st.write("Add your API key in **Secrets** as STORMGLASS_API_KEY.")
+    show_current_arrows = st.checkbox("Show current arrows", value=True)
+    show_wave_arrows = st.checkbox("Show significant wave arrows", value=True)
 
 api_key = st.secrets.get("STORMGLASS_API_KEY") or os.getenv("STORMGLASS_API_KEY")
 debug = st.sidebar.checkbox("Debug API params to logs", value=False)
@@ -175,14 +154,20 @@ def enrich_df(df_in: pd.DataFrame):
     }
     out.rename(columns=rename_map, inplace=True)
 
+    # Derive 'to' direction from 'from' if available
+    if "currentDir_deg_from" in out.columns:
+        try:
+            out["currentDir_deg_to"] = (out["currentDir_deg_from"].astype(float) + 180.0) % 360.0
+        except Exception:
+            pass
+
     preferred_cols = [
         "timestamp_utc","requested_iso","iso_time","lat","lon",
         "windSpeed_kt","windDir_deg_from",
         "sigWaveHeight_m","sigWaveDir_deg_from",
         "windWaveHeight_m","windWaveDir_deg_from",
         "swellHeight_m","swellDir_deg_from",
-        "currentSpeed_kt","currentDir_deg_to","currentDir_deg_from"
-    ]
+        "currentSpeed_kt","currentDir_deg_to","currentDir_deg_from"]
     existing = [c for c in preferred_cols if c in out.columns]
     others = [c for c in out.columns if c not in existing]
     out = out[existing + others]
@@ -193,8 +178,6 @@ def make_map(df_points: pd.DataFrame, show_current_arrows=True, show_wave_arrows
         return None
     center = [df_points["lat"].mean(), df_points["lon"].mean()]
     m = folium.Map(location=center, zoom_start=3, tiles="OpenStreetMap", control_scale=True)
-    curr_fg = folium.FeatureGroup(name='Currents', show=True)
-    wave_fg = folium.FeatureGroup(name='Significant Waves', show=True)
 
     folium.TileLayer(
         tiles="https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png",
@@ -203,6 +186,9 @@ def make_map(df_points: pd.DataFrame, show_current_arrows=True, show_wave_arrows
         overlay=True,
         control=True
     ).add_to(m)
+
+    curr_fg = folium.FeatureGroup(name='Currents', show=True)
+    wave_fg = folium.FeatureGroup(name='Significant Waves', show=True)
 
     for _, r in df_points.iterrows():
         wind_kt = r.get("windSpeed_kt")
@@ -226,7 +212,7 @@ Wind: {ws_txt} kt @ {r.get('windDir_deg_from','')} deg (from)
 Significant wave (Hs): {r.get('sigWaveHeight_m','')} m @ {r.get('sigWaveDir_deg_from','')} deg (from)
 Wind wave: {r.get('windWaveHeight_m','')} m @ {r.get('windWaveDir_deg_from','')} deg (from)
 Swell: {r.get('swellHeight_m','')} m @ {r.get('swellDir_deg_from','')} deg (from)
-Current: {cs_txt} kt @ {r.get('currentDir_deg_to','')}° (to) / {r.get('currentDir_deg_from','')}° (from)
+Current: {cs_txt} kt @ {r.get('currentDir_deg_to','')} deg (to) / {r.get('currentDir_deg_from','')} deg (from)
 """,
             sticky=True
         )
@@ -240,10 +226,10 @@ Current: {cs_txt} kt @ {r.get('currentDir_deg_to','')}° (to) / {r.get('currentD
             weight=1
         ).add_child(tt).add_to(m)
 
-        # Current arrow (points into the position; direction is 'to')
+        # Currents
         cs_val = r.get("currentSpeed_kt")
         cd_to = r.get("currentDir_deg_to")
-        if cs_val is not None and not pd.isna(cs_val) and cd_to is not None and not pd.isna(cd_to):
+        if show_current_arrows and cs_val is not None and not pd.isna(cs_val) and cd_to is not None and not pd.isna(cd_to):
             if cs_val < 0.5:
                 c_col = "#FFA500"  # orange
             elif cs_val > 2.0:
@@ -253,16 +239,13 @@ Current: {cs_txt} kt @ {r.get('currentDir_deg_to','')}° (to) / {r.get('currentD
             else:
                 c_col = "#FFA500"
             c_len = 800 + float(cs_val) * 1800  # meters
-                
-            if show_current_arrows:
-                draw_vector(curr_fg, r["lat"], r["lon"], float(cd_to), shaft_len_m=c_len, body_weight=5, color=c_col)
+            draw_vector(curr_fg, r["lat"], r["lon"], float(cd_to), shaft_len_m=c_len, body_weight=5, color=c_col)
 
-
-        # Significant wave direction arrow (points into the position, using FROM dir)
+        # Sig waves
         hs = r.get("sigWaveHeight_m")
         wd_from = r.get("sigWaveDir_deg_from")
-        if hs is not None and not pd.isna(hs) and wd_from is not None and not pd.isna(wd_from):
-            wave_bearing_into_tip = float(wd_from)  # coming from this bearing into the point
+        if show_wave_arrows and hs is not None and not pd.isna(hs) and wd_from is not None and not pd.isna(wd_from):
+            wave_bearing_into_tip = float(wd_from)  # waves arriving from this bearing
             if hs < 2.0:
                 w_col = "#D3D3D3"  # light grey
             elif hs > 4.0:
@@ -270,9 +253,7 @@ Current: {cs_txt} kt @ {r.get('currentDir_deg_to','')}° (to) / {r.get('currentD
             else:
                 w_col = "#696969"  # dark grey
             w_len = 700 + float(hs) * 700  # meters
-                        if show_wave_arrows:
-                draw_vector(wave_fg, r["lat"], r["lon"], wave_bearing_into_tip, shaft_len_m=w_len, body_weight=7, color=w_col)
-
+            draw_vector(wave_fg, r["lat"], r["lon"], wave_bearing_into_tip, shaft_len_m=w_len, body_weight=7, color=w_col)
 
     curr_fg.add_to(m)
     wave_fg.add_to(m)
@@ -281,7 +262,11 @@ Current: {cs_txt} kt @ {r.get('currentDir_deg_to','')}° (to) / {r.get('currentD
 
 result_df = None
 
-if do_single:
+if tab_single:
+    pass  # tabs are contexts, no-ops here
+
+# Handle actions
+if 'do_single' in locals() and do_single:
     df = pd.DataFrame([{"timestamp": ts, "lat": lat, "lon": lon}])
     try:
         df_norm = df.rename(columns={"timestamp":"timestamp","lat":"lat","lon":"lon"})
@@ -291,7 +276,7 @@ if do_single:
     except Exception as e:
         st.error(f"Failed to parse/fetch: {e}")
 
-if do_bulk and uploaded is not None:
+if 'do_bulk' in locals() and do_bulk and uploaded is not None:
     try:
         if uploaded.name.lower().endswith(".csv"):
             df_in = pd.read_csv(uploaded)
@@ -312,7 +297,7 @@ if isinstance(result_df, pd.DataFrame) and not result_df.empty:
     st.dataframe(df_display, use_container_width=True, hide_index=True)
 
     csv_bytes = result_df.to_csv(index=False).encode("utf-8")
-    st.download_button("Download CSV", data=csv_bytes, file_name="nautical_weather_results.csv", mime="text/csv")
+    st.download_button("⬇️ Download CSV", data=csv_bytes, file_name="nautical_weather_results.csv", mime="text/csv")
 
     st.subheader("3) Map")
     m = make_map(result_df, show_current_arrows=show_current_arrows, show_wave_arrows=show_wave_arrows)
@@ -322,4 +307,4 @@ if isinstance(result_df, pd.DataFrame) and not result_df.empty:
     else:
         st.info("No map to display yet.")
 else:
-    st.info("Enter a point or upload a file, then click Fetch.")
+    st.info("Enter a point or upload a file, then click **Fetch**.")
