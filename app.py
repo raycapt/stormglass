@@ -4,7 +4,12 @@ import streamlit as st
 import pandas as pd
 import stormglass_client as sgc
 from stormglass_client import StormglassClient
-from utils import to_knots, normalize_input_df, wind_color
+try:
+    from utils import to_knots, normalize_input_df, wind_color
+except ModuleNotFoundError:
+    import sys, os
+    sys.path.append(os.path.dirname(__file__))
+    from utils import to_knots, normalize_input_df, wind_color
 
 st.set_page_config(page_title="Nautical Weather Map", page_icon="🌊", layout="wide")
 
