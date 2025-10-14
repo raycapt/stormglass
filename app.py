@@ -57,6 +57,22 @@ def draw_arrow(m, tip_lat, tip_lon, bearing_towards_tip_deg, shaft_len_m=2000, c
     right_lat, right_lon = destination_point(tip_lat, tip_lon, right_bearing, head_len)
     folium.PolyLine([[right_lat, right_lon], [tip_lat, tip_lon]], color=color, weight=weight, opacity=0.9).add_to(m)
 
+def draw_vector(m, tip_lat, tip_lon, bearing_towards_tip_deg, shaft_len_m=2000, body_weight=4, color="#FF0000"):
+    """Windy-like vector: thick shaft + filled triangular head at tip."""
+    # Tail of shaft
+    tail_bearing = (bearing_towards_tip_deg + 180.0) % 360.0
+    tail_lat, tail_lon = destination_point(tip_lat, tip_lon, tail_bearing, shaft_len_m)
+    # Shaft
+    folium.PolyLine([[tail_lat, tail_lon], [tip_lat, tip_lon]], color=color, weight=body_weight, opacity=0.95).add_to(m)
+    # Triangle head
+    head_len = max(shaft_len_m * 0.22, 350)
+    spread = 22.0
+    left_brg = (bearing_towards_tip_deg - spread) % 360.0
+    right_brg = (bearing_towards_tip_deg + spread) % 360.0
+    left_lat, left_lon = destination_point(tip_lat, tip_lon, left_brg, head_len)
+    right_lat, right_lon = destination_point(tip_lat, tip_lon, right_brg, head_len)
+    folium.Polygon(locations=[[left_lat,left_lon],[tip_lat,tip_lon],[right_lat,right_lon]], color=color, fill=True, weight=0, fill_opacity=0.95).add_to(m)
+
 # ---------------- Streamlit UI ----------------
 st.set_page_config(page_title="Nautical Weather Map", page_icon="🌊", layout="wide")
 
@@ -153,7 +169,7 @@ def enrich_df(df_in: pd.DataFrame):
         "windWaveDirection": "windWaveDir_deg_from",
         "swellDirection": "swellDir_deg_from",
         "swellHeight": "swellHeight_m",
-        "currentDirection": "currentDir_deg_to",
+        "currentDirection": "currentDir_deg_from",
     }
     out.rename(columns=rename_map, inplace=True)
 
@@ -163,7 +179,7 @@ def enrich_df(df_in: pd.DataFrame):
         "sigWaveHeight_m","sigWaveDir_deg_from",
         "windWaveHeight_m","windWaveDir_deg_from",
         "swellHeight_m","swellDir_deg_from",
-        "currentSpeed_kt","currentDir_deg_to"]
+        "currentSpeed_kt","currentDir_deg_from","currentDir_deg_to"]
     existing = [c for c in preferred_cols if c in out.columns]
     others = [c for c in out.columns if c not in existing]
     out = out[existing + others]
@@ -205,7 +221,7 @@ Wind: {ws_txt} kt @ {r.get('windDir_deg_from','')} deg (from)
 Significant wave (Hs): {r.get('sigWaveHeight_m','')} m @ {r.get('sigWaveDir_deg_from','')} deg (from)
 Wind wave: {r.get('windWaveHeight_m','')} m @ {r.get('windWaveDir_deg_from','')} deg (from)
 Swell: {r.get('swellHeight_m','')} m @ {r.get('swellDir_deg_from','')} deg (from)
-Current: {cs_txt} kt @ {r.get('currentDir_deg_to','')} deg (to)
+Current: {cs_txt} kt @ {r.get('currentDir_deg_to','')}° (to) / {r.get('currentDir_deg_from','')}° (from)
 """,
             sticky=True
         )
@@ -232,7 +248,7 @@ Current: {cs_txt} kt @ {r.get('currentDir_deg_to','')} deg (to)
             else:
                 c_col = "#FFA500"
             c_len = 800 + float(cs_val) * 1800  # meters
-            draw_arrow(m, r["lat"], r["lon"], float(cd_to), shaft_len_m=c_len, color=c_col, weight=3)
+            draw_vector(m, r["lat"], r["lon"], float(cd_to), shaft_len_m=c_len, body_weight=5, color=c_col)
 
         # Significant wave direction arrow (points into the position, using FROM dir)
         hs = r.get("sigWaveHeight_m")
@@ -246,7 +262,7 @@ Current: {cs_txt} kt @ {r.get('currentDir_deg_to','')} deg (to)
             else:
                 w_col = "#696969"  # dark grey
             w_len = 700 + float(hs) * 700  # meters
-            draw_arrow(m, r["lat"], r["lon"], wave_bearing_into_tip, shaft_len_m=w_len, color=w_col, weight=5)
+            draw_vector(m, r["lat"], r["lon"], wave_bearing_into_tip, shaft_len_m=w_len, body_weight=7, color=w_col)
 
     folium.LayerControl().add_to(m)
     return m
