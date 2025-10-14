@@ -4,12 +4,62 @@ import streamlit as st
 import pandas as pd
 import stormglass_client as sgc
 from stormglass_client import StormglassClient
+
+# Robust local import of utils whether running from repo root or a subfolder (e.g., /mount/src/stormglass/app.py)
+import sys, os
+from pathlib import Path
+_here = Path(__file__).resolve()
+_candidates = [
+    _here.parent,            # folder containing app.py
+    _here.parent.parent,     # parent folder (repo root when app is in a subfolder)
+]
+for _p in _candidates:
+    if _p and str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 try:
     from utils import to_knots, normalize_input_df, wind_color
-except ModuleNotFoundError:
-    import sys, os
-    sys.path.append(os.path.dirname(__file__))
-    from utils import to_knots, normalize_input_df, wind_color
+from math import radians, degrees, sin, cos, asin, atan2
+
+EARTH_R_M = 6371000.0
+
+def destination_point(lat, lon, bearing_deg, distance_m):
+    \"\"\"Compute destination point from (lat, lon) moving distance_m along bearing_deg (0 deg = North).\"\"\"
+    phi1 = radians(lat)
+    lam1 = radians(lon)
+    theta = radians(bearing_deg)
+    delta = distance_m / EARTH_R_M
+
+    sin_phi2 = sin(phi1) * cos(delta) + cos(phi1) * sin(delta) * cos(theta)
+    phi2 = asin(sin_phi2)
+    y = sin(theta) * sin(delta) * cos(phi1)
+    x = cos(delta) - sin(phi1) * sin_phi2
+    lam2 = lam1 + atan2(y, x)
+
+    return degrees(phi2), (degrees(lam2) + 540) % 360 - 180  # normalize lon
+
+def draw_arrow(m, tip_lat, tip_lon, bearing_towards_tip_deg, shaft_len_m=2000, color=\"#FF0000\", weight=3):
+    \"\"\"Draw an arrow with head at the tip; it points into the tip from bearing_towards_tip_deg.\"\"\"
+    # Tail point is away from the tip along the opposite direction
+    tail_bearing = (bearing_towards_tip_deg + 180.0) % 360.0
+    tail_lat, tail_lon = destination_point(tip_lat, tip_lon, tail_bearing, shaft_len_m)
+
+    # Main shaft
+    folium.PolyLine([[tail_lat, tail_lon], [tip_lat, tip_lon]], color=color, weight=weight, opacity=0.9).add_to(m)
+
+    # Arrow head (two short segments)
+    head_len = max(shaft_len_m * 0.25, 400)  # ensure visible
+    head_angle = 25.0  # degrees off the shaft
+    # Left head
+    left_bearing = (bearing_towards_tip_deg - head_angle) % 360.0
+    left_lat, left_lon = destination_point(tip_lat, tip_lon, left_bearing, head_len)
+    folium.PolyLine([[left_lat, left_lon], [tip_lat, tip_lon]], color=color, weight=weight, opacity=0.9).add_to(m)
+    # Right head
+    right_bearing = (bearing_towards_tip_deg + head_angle) % 360.0
+    right_lat, right_lon = destination_point(tip_lat, tip_lon, right_bearing, head_len)
+    folium.PolyLine([[right_lat, right_lon], [tip_lat, tip_lon]], color=color, weight=weight, opacity=0.9).add_to(m)
+
+except Exception as _e:
+    raise ModuleNotFoundError(f"Could not import utils.py. Tried paths: {list(map(str, _candidates))}. Original error: {_e}")
 
 st.set_page_config(page_title="Nautical Weather Map", page_icon="🌊", layout="wide")
 
@@ -174,6 +224,35 @@ def make_map(df_points: pd.DataFrame):
             fill_opacity=0.9,
             weight=1
         ).add_child(tt).add_to(m)
+
+        # ---- Current arrow (arrow points INTO the position; direction is 'to') ----
+        cs_val = r.get("currentSpeed_kt")
+        cd_to = r.get("currentDir_deg_to")
+        if cs_val is not None and not pd.isna(cs_val) and cd_to is not None and not pd.isna(cd_to):
+            if cs_val < 0.5:
+                c_col = "#FFA500"  # orange
+            elif cs_val > 2.0:
+                c_col = "#FF0000"  # bright red
+            elif cs_val > 1.0:
+                c_col = "#FF7F7F"  # light red
+            else:
+                c_col = "#FFA500"
+            c_len = 800 + float(cs_val) * 1800  # meters
+            draw_arrow(m, r["lat"], r["lon"], float(cd_to), shaft_len_m=c_len, color=c_col, weight=3)
+
+        # ---- Significant wave direction arrow (points INTO the position) ----
+        hs = r.get("sigWaveHeight_m")
+        wd_from = r.get("sigWaveDir_deg_from")
+        if hs is not None and not pd.isna(hs) and wd_from is not None and not pd.isna(wd_from):
+            wave_bearing_into_tip = float(wd_from)  # coming from this bearing into the point
+            if hs < 2.0:
+                w_col = "#D3D3D3"  # light grey
+            elif hs > 4.0:
+                w_col = "#00008B"  # dark blue
+            else:
+                w_col = "#696969"  # dark grey
+            w_len = 700 + float(hs) * 700  # meters
+            draw_arrow(m, r["lat"], r["lon"], wave_bearing_into_tip, shaft_len_m=w_len, color=w_col, weight=5)
 
     folium.LayerControl().add_to(m)
     return m
