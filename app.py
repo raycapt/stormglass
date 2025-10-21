@@ -150,7 +150,8 @@ def enrich_df(df_in: pd.DataFrame):
         "windWaveDirection": "windWaveDir_deg_from",
         "swellDirection": "swellDir_deg_from",
         "swellHeight": "swellHeight_m",
-        "currentDirection": "currentDir_deg_from",
+        "currentDirection": "currentDir_deg_from",,
+        "waterTemperature": "seaWaterTemp_C"
     }
     out.rename(columns=rename_map, inplace=True)
 
@@ -167,7 +168,7 @@ def enrich_df(df_in: pd.DataFrame):
         "sigWaveHeight_m","sigWaveDir_deg_from",
         "windWaveHeight_m","windWaveDir_deg_from",
         "swellHeight_m","swellDir_deg_from",
-        "currentSpeed_kt","currentDir_deg_to","currentDir_deg_from"]
+        "currentSpeed_kt","currentDir_deg_to","currentDir_deg_from", "seaWaterTemp_C"]
     existing = [c for c in preferred_cols if c in out.columns]
     others = [c for c in out.columns if c not in existing]
     out = out[existing + others]
@@ -213,6 +214,7 @@ Significant wave (Hs): {r.get('sigWaveHeight_m','')} m @ {r.get('sigWaveDir_deg_
 Wind wave: {r.get('windWaveHeight_m','')} m @ {r.get('windWaveDir_deg_from','')} deg (from)
 Swell: {r.get('swellHeight_m','')} m @ {r.get('swellDir_deg_from','')} deg (from)
 Current: {cs_txt} kt @ {r.get('currentDir_deg_to','')} deg (to) / {r.get('currentDir_deg_from','')} deg (from)
+Sea water temp: {r.get('seaWaterTemp_C', '')} °C
 """,
             sticky=True
         )
@@ -292,7 +294,8 @@ if isinstance(result_df, pd.DataFrame) and not result_df.empty:
     df_display = result_df.copy()
     df_display = df_display.rename(columns={
         "currentDir_deg_to": "Current direction (going to)",
-        "currentDir_deg_from": "Current direction (coming from)"
+        "currentDir_deg_from": "Current direction (coming from)",
+        "seaWaterTemp_C": "Sea water temp (°C)"
     })
     st.dataframe(df_display, use_container_width=True, hide_index=True)
 

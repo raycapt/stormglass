@@ -111,7 +111,7 @@ class StormglassClient:
                 "swellHeight","swellDirection",
                 "windWaveHeight","windWaveDirection",
                 "currentSpeed","currentDirection"
-            ]),
+            , "waterTemperature"]),
             # If your subscription supports single-source responses, you can add: "source": "sg"
             "start": start,
             "end": end,
@@ -151,16 +151,15 @@ class StormglassClient:
                 "waveHeight","waveDirection",
                 "swellHeight","swellDirection",
                 "windWaveHeight","windWaveDirection",
-                "currentSpeed","currentDirection"
+                "currentSpeed","currentDirection", "waterTemperature"
             ]:
                 out[k] = self._get_value(h, k)
         else:
-            for k in [
-                "windSpeed","windDirection",
+            for k i"windSpeed","windDirection",
                 "waveHeight","waveDirection",
                 "swellHeight","swellDirection",
                 "windWaveHeight","windWaveDirection",
-                "currentSpeed","currentDirection"
+                "currentSpeed","currentDirection", "waterTemperature"","currentDirection"
             ]:
                 out[k] = None
 
