@@ -105,13 +105,7 @@ class StormglassClient:
             "lat": float(lat),
             "lng": float(lon),
             # Request just what we need for this app
-            "params": ",".join([
-                "windSpeed","windDirection",
-                "waveHeight","waveDirection",
-                "swellHeight","swellDirection",
-                "windWaveHeight","windWaveDirection",
-                "currentSpeed","currentDirection"
-            , "waterTemperature"]),
+            "params": ",".join([ "windSpeed","windDirection", "waveHeight","waveDirection", "swellHeight","swellDirection", "windWaveHeight","windWaveDirection", "currentSpeed","currentDirection", "waterTemperature"]),
             # If your subscription supports single-source responses, you can add: "source": "sg"
             "start": start,
             "end": end,
@@ -146,21 +140,10 @@ class StormglassClient:
             out["iso_time"] = h.get("time")
 
             # Map the variables to our app schema
-            for k in [
-                "windSpeed","windDirection",
-                "waveHeight","waveDirection",
-                "swellHeight","swellDirection",
-                "windWaveHeight","windWaveDirection",
-                "currentSpeed","currentDirection", "waterTemperature"
-            ]:
+            for k in ["windSpeed","windDirection","waveHeight","waveDirection","swellHeight","swellDirection","windWaveHeight","windWaveDirection","currentSpeed","currentDirection","waterTemperature"]:
                 out[k] = self._get_value(h, k)
         else:
-            for k i"windSpeed","windDirection",
-                "waveHeight","waveDirection",
-                "swellHeight","swellDirection",
-                "windWaveHeight","windWaveDirection",
-                "currentSpeed","currentDirection", "waterTemperature"","currentDirection"
-            ]:
+            for k in ["windSpeed","windDirection","waveHeight","waveDirection","swellHeight","swellDirection","windWaveHeight","windWaveDirection","currentSpeed","currentDirection","waterTemperature"]:
                 out[k] = None
 
         return out
