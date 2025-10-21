@@ -150,7 +150,7 @@ def enrich_df(df_in: pd.DataFrame):
         "windWaveDirection": "windWaveDir_deg_from",
         "swellDirection": "swellDir_deg_from",
         "swellHeight": "swellHeight_m",
-        "currentDirection": "currentDir_deg_from",,
+        "currentDirection": "currentDir_deg_from",
         "waterTemperature": "seaWaterTemp_C"
     }
     out.rename(columns=rename_map, inplace=True)
